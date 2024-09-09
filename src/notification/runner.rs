@@ -59,7 +59,7 @@ impl NotificationRunner {
                     }
                     _ => {
                         error!(
-                            " nCould not get notification code for {:?}",
+                            "Could not get notification code for {:?}",
                             notification_id
                         );
                         continue;

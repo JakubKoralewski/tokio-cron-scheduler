@@ -48,16 +48,20 @@ features = ["with-uuid-1"]
 
 [dependencies.tokio-rusqlite]
 # New version (after 0.5.1) hasn't been released with "bundled" feature
-git = "https://github.com/programatik29/tokio-rusqlite"
-rev = "d101d1c"
-features = [ "bundled" ]
+# git = "https://github.com/programatik29/tokio-rusqlite"
+# rev = "d101d1c"
+git = "https://github.com/JakubKoralewski/tokio-rusqlite"
+# rev = "c0250e4" # without this commit cannot access rusqlite::Error
+rev = "142adf3" # without this commit cannot enable uuid in rusqlite
+# path = "../tokio-rusqlite"
+features = [ "bundled", "uuid" ]
 default-features = false
 optional = true
 
 [dev-dependencies]
 anyhow = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-chrono-tz = { version = "0.8.5" } # TODO: update chrono-tz (0.9 available atm)
+chrono-tz = { version = "0.8.5" } # TODO: update chrono-tz (0.10 available atm)
 
 [build-dependencies]
 prost-build = { version = "0.13", optional = true }
@@ -93,3 +97,8 @@ required-features = ["nats_storage", "tracing-subscriber"]
 name = "postgres"
 path = "examples/postgres_job.rs"
 required-features = ["postgres_storage", "tracing-subscriber"]
+
+[[example]]
+name = "sqlite"
+path = "examples/sqlite_job.rs"
+required-features = ["sqlite_storage", "tracing-subscriber"]

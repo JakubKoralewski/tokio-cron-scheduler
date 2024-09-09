@@ -57,8 +57,12 @@ impl JobRunner {
                         }
                     });
                 }
-                _ => {
-                    error!("Error getting {:?} from job code", uuid);
+                Ok(None) => {
+                    error!("Error getting {uuid:?} from job code");
+                    continue;
+                }
+                Err(e) => {
+                    error!("Error getting {uuid:?} from job code {e:?}");
                     continue;
                 }
             }

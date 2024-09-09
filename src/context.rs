@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub type NotificationDeletedResult =
     Result<(Uuid, bool, Option<Vec<JobState>>), (JobSchedulerError, Option<NotificationId>)>;
 
+#[derive(Clone)]
 pub struct Context {
     pub job_activation_tx: Sender<Uuid>,
     pub notify_tx: Sender<(Uuid, JobState)>,
@@ -101,27 +102,6 @@ impl Context {
             notification_storage,
             job_code,
             notification_code,
-        }
-    }
-}
-
-impl Clone for Context {
-    fn clone(&self) -> Self {
-        Self {
-            job_activation_tx: self.job_activation_tx.clone(),
-            notify_tx: self.notify_tx.clone(),
-            job_create_tx: self.job_create_tx.clone(),
-            job_created_tx: self.job_created_tx.clone(),
-            job_delete_tx: self.job_delete_tx.clone(),
-            job_deleted_tx: self.job_deleted_tx.clone(),
-            notify_create_tx: self.notify_create_tx.clone(),
-            notify_created_tx: self.notify_created_tx.clone(),
-            notify_delete_tx: self.notify_delete_tx.clone(),
-            notify_deleted_tx: self.notify_deleted_tx.clone(),
-            metadata_storage: self.metadata_storage.clone(),
-            notification_storage: self.notification_storage.clone(),
-            job_code: self.job_code.clone(),
-            notification_code: self.notification_code.clone(),
         }
     }
 }

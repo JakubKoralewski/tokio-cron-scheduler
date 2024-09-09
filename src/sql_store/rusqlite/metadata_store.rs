@@ -59,7 +59,7 @@ impl DataStore<JobStoredData> for SqliteMetadataStore {
                         + &*table
                         + " where id = $1 limit 1";
                     let row: Result<JobStoredData, _> = store.call(move |store| {
-                        Ok(store.query_row(&sql, &[&id.as_bytes()], |row| Ok(row.into()))?)
+                        Ok(store.query_row(&sql, &[&id], |row| Ok(row.into()))?)
                     }).await;
                     match row {
                         Err(e) => {
@@ -134,7 +134,7 @@ impl DataStore<JobStoredData> for SqliteMetadataStore {
                         Ok(store.execute(
                             &sql,
                             tokio_rusqlite::params![
-                                uuid.as_bytes(),
+                                uuid,
                                 last_updated,
                                 next_tick,
                                 job_type,
@@ -179,7 +179,7 @@ impl DataStore<JobStoredData> for SqliteMetadataStore {
                     let val = store.call(move |store|
                         Ok(store.execute(
                             &sql,
-                            &[&guid.as_bytes()]
+                            &[&guid]
                         )?)
                     ).await;
                     match val {
@@ -202,7 +202,7 @@ impl<'stmt> From<&tokio_rusqlite::Row<'stmt>> for JobStoredData {
                         ran, stopped, schedule, repeating, repeated_every, \
                         extra, time_offset_seconds
          */
-        let id: Uuid = Uuid::from_bytes(row.get(0).unwrap());
+        let id: Uuid = row.get(0).unwrap();
         let last_updated = row.get(1).ok().map(|i: i64| i as u64);
         let next_tick = row
             .get(2)
@@ -355,7 +355,7 @@ impl MetaDataStorage for SqliteMetadataStore {
                         move |store| {
                             let mut stmt = store.prepare(&*sql)?;
                             let x = Ok(stmt.query_map([now], |row| {
-                                let id: Uuid = Uuid::from_bytes(row.get(0)?);
+                                let id: Uuid = row.get(0)?;
                                 let id: JobUuid = id.into();
                                 let job_type = row.get(1)?;
                                 let next_tick = row
@@ -416,7 +416,7 @@ impl MetaDataStorage for SqliteMetadataStore {
                         WHERE \
                             id = $3";
                     let resp = store.call(move |store|
-                        Ok(store.execute(&sql, tokio_rusqlite::params![&next_tick, &last_tick, &guid.as_bytes()])?)
+                        Ok(store.execute(&sql, tokio_rusqlite::params![&next_tick, &last_tick, &guid])?)
                     ).await;
                     if let Err(e) = resp {
                         error!("Error updating next and last tick {:?}", e);

@@ -57,9 +57,9 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                     let sql =
                         "SELECT id, job_id, extra from ".to_string() + &*table + " where id = $1";
                     let data = store.call(move |store|
-                        Ok(store.query_row(&*sql, &[&id.as_bytes()], |row| {
-                            let notification_id =  Uuid::from_bytes(row.get(0).unwrap());
-                            let job_id: Uuid = Uuid::from_bytes(row.get(1).unwrap());
+                        Ok(store.query_row(&*sql, &[&id], |row| {
+                            let notification_id: Uuid = row.get(0).unwrap();
+                            let job_id: Uuid = row.get(1).unwrap();
 
                             let job_id = JobIdAndNotification {
                                 job_id: Some(job_id.into()),
@@ -72,6 +72,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                         })?)
                     ).await;
                     let (notification_id, job_id, extra) = match data {
+                        Err(tokio_rusqlite::Error::Rusqlite(tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows)) => return Ok(None),
                         Err(e) => {
                             error!("Error fetching notification data {:?}", e);
                             return Err(JobSchedulerError::GetJobData);
@@ -84,7 +85,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                             "SELECT state from ".to_string() + &*states_table + " where id = $1";
                         let rows = store.call(move |store|  {
                             let mut stmt = store.prepare(&sql).unwrap();
-                            let x = Ok(stmt.query_map(&[&notification_id.as_bytes()], |row| row.get(0))?.collect::<Result<Vec<i32>, _>>()?); x
+                            let x = Ok(stmt.query_map(&[&notification_id], |row| row.get(0))?.collect::<Result<Vec<i32>, _>>()?); x
                         }).await;
                         match rows {
                             Ok(rows) => rows,
@@ -124,7 +125,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                             None => return Err(JobSchedulerError::UpdateJobData),
                         };
                     let sql = "DELETE FROM ".to_string() + &*states_table + " WHERE id = $1";
-                    let result = store.call(move |store| Ok(store.execute(&sql, &[&notification_id.as_bytes()])?)).await;
+                    let result = store.call(move |store| Ok(store.execute(&sql, &[&notification_id])?)).await;
                     if let Err(e) = result {
                         error!("Error deleting {:?}", e);
                     }
@@ -144,7 +145,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                              Ok(
                                 store.execute(
                                     &sql,
-                                    tokio_rusqlite::params![notification_id.as_bytes(), job_id.as_bytes(), &extra]
+                                    tokio_rusqlite::params![notification_id, job_id, &extra]
                                 )
                             ?)
                     ).await;
@@ -163,7 +164,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                                 .map(|s| format!("($1, {})", s))
                                 .collect::<Vec<_>>()
                                 .join(",");
-                        let result = store.call(move |store| Ok(store.execute(&sql, &[&notification_id.as_bytes()])?)).await;
+                        let result = store.call(move |store| Ok(store.execute(&sql, &[&notification_id])?)).await;
                         if let Err(e) = result {
                             error!("Error inserting state vals {:?}", e);
                         }
@@ -188,7 +189,7 @@ impl DataStore<NotificationData> for SqliteNotificationStore {
                     let sql = "DELETE FROM ".to_string() + &*table + " WHERE id = $1";
 
                     store.call(move |store|
-                        Ok(store.execute(&*sql, &[&guid.as_bytes()])?)
+                        Ok(store.execute(&*sql, &[&guid])?)
                     ).await.map(|_| ()).map_err(|e| {
                         error!("Error deleting notification {:?}", e);
                         JobSchedulerError::CantRemove
@@ -304,8 +305,8 @@ impl NotificationStore for SqliteNotificationStore {
                     let result = store.call(move |store| {
                         let mut stmt = store.prepare(&sql)?;
                         let x = Ok(stmt.query_map(
-                            tokio_rusqlite::params![&job.as_bytes(), &state],
-                            |row| Ok(Uuid::from_bytes(row.get(0)?))
+                            tokio_rusqlite::params![&job, &state],
+                            |row| Ok(row.get(0)?)
                         )?.collect::<Result<Vec<Uuid>,_>>()?); x
                     }).await;
                     match result {
@@ -344,8 +345,8 @@ impl NotificationStore for SqliteNotificationStore {
                     let result = store.call(move |store| {
                         let mut stmt = store.prepare(&sql)?;
                         let x = Ok(stmt.query_map(
-                            tokio_rusqlite::params![&job_id.as_bytes()],
-                            |row| Ok(Uuid::from_bytes(row.get(0)?))
+                            tokio_rusqlite::params![&job_id],
+                            |row| Ok(row.get(0)?)
                         )?.collect::<Result<Vec<Uuid>,_>>()?); x
                     }).await;
                     match result {
@@ -386,7 +387,7 @@ impl NotificationStore for SqliteNotificationStore {
                     RETURNING state";
                     let result = store.call(
                         move |store| 
-                            Ok(store.execute(&*sql, tokio_rusqlite::params![&notification_id.as_bytes(), &state])?)
+                            Ok(store.execute(&*sql, tokio_rusqlite::params![&notification_id, &state])?)
                     ).await;
                     match result {
                         Ok(row) => Ok(row != 0),
@@ -414,7 +415,7 @@ impl NotificationStore for SqliteNotificationStore {
                 SqliteStore::Inited(store) => {
                     let sql = "DELETE FROM ".to_string() + &*table + " WHERE job_id = $1";
                     store.call(move |store| 
-                        Ok(store.execute(&*sql, &[&job_id.as_bytes()])?)
+                        Ok(store.execute(&*sql, &[&job_id])?)
                     )
                         .await
                         .map(|_| ())
