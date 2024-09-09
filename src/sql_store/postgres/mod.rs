@@ -6,7 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::Client;
 use tracing::error;
 
 pub use metadata_store::PostgresMetadataStore;
@@ -76,15 +76,15 @@ impl PostgresStore {
             match self {
                 PostgresStore::Created(url) => {
                     #[cfg(feature = "postgres-openssl")]
-                    let tls = postgres_openssl::TlsConnector;
+                    let tls = postgres_openssl::TlsConnector; // FIXME: `error[E0423]: expected value, found struct`
                     #[cfg(feature = "postgres-native-tls")]
-                    let tls = postgres_native_tls::TlsConnector;
+                    let tls = postgres_native_tls::TlsConnector; // FIXME: `error[E0423]: expected value, found struct`
                     #[cfg(not(any(
                         feature = "postgres-native-tls",
                         feature = "postgres-openssl"
                     )))]
-                    let tls = NoTls;
-                    let connect = tokio_postgres::connect(&*url, tls).await;
+                    let tls = tokio_postgres::NoTls;
+                    let connect = tokio_postgres::connect(&url, tls).await;
                     if let Err(e) = connect {
                         error!("Error connecting to postgres {:?}", e);
                         return Err(JobSchedulerError::CantInit);

@@ -12,10 +12,6 @@ mod nats;
 mod notification;
 #[cfg(any(feature = "postgres_storage", feature = "sqlite_storage" ))]
 mod sql_store;
-#[cfg(feature = "postgres_storage")]
-use sql_store::postgres;
-#[cfg(feature = "sqlite_storage")]
-use sql_store::rusqlite;
 mod scheduler;
 mod simple;
 mod store;

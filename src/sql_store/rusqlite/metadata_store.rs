@@ -3,6 +3,7 @@ use crate::sql_store::rusqlite::SqliteStore;
 use crate::store::{DataStore, InitStore, MetaDataStorage};
 use crate::{JobAndNextTick, JobSchedulerError, JobStoredData, JobUuid};
 use chrono::{DateTime, Utc};
+use std::convert::TryFrom;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -218,13 +219,13 @@ impl<'stmt> From<&tokio_rusqlite::Row<'stmt>> for JobStoredData {
             use crate::job::job_data_prost::job_stored_data::Job::CronJob as CronJobType;
             use crate::job::job_data_prost::job_stored_data::Job::NonCronJob as NonCronJobType;
 
-            let job_type = JobType::from_i32(job_type);
+            let job_type = JobType::try_from(job_type);
             match job_type {
-                Some(JobType::Cron) => match row.get(8) {
+                Ok(JobType::Cron) => match row.get(8) {
                     Ok(schedule) => Some(CronJobType(CronJob { schedule })),
                     _ => None,
                 },
-                Some(_) => {
+                Ok(_) => {
                     let repeating = row.get(9).unwrap();
                     let repeated_every = row
                         .get(10)
@@ -236,7 +237,7 @@ impl<'stmt> From<&tokio_rusqlite::Row<'stmt>> for JobStoredData {
                         repeated_every,
                     }))
                 }
-                None => None,
+                Err(_) => None,
             }
         };
         let extra = row.get(11).unwrap_or_default();

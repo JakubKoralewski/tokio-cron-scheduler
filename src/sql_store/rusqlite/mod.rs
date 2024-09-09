@@ -2,11 +2,6 @@ mod metadata_store;
 mod notification_store;
 
 use crate::JobSchedulerError;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::error;
 
 pub use metadata_store::SqliteMetadataStore;
 pub use notification_store::SqliteNotificationStore;

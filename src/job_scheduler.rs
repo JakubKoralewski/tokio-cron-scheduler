@@ -8,7 +8,7 @@ use crate::simple::{
     SimpleJobCode, SimpleMetadataStore, SimpleNotificationCode, SimpleNotificationStore,
 };
 use crate::store::{MetaDataStorage, NotificationStore};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -368,9 +368,9 @@ impl JobsSchedulerLocked {
                 if vv.next_tick == 0 {
                     return None;
                 }
-                match NaiveDateTime::from_timestamp_opt(vv.next_tick as i64, 0) {
+                match DateTime::from_timestamp(vv.next_tick as i64, 0) {
                     None => None,
-                    Some(ts) => Some(DateTime::from_naive_utc_and_offset(ts, Utc)),
+                    Some(ts) => Some(ts),
                 }
             } else {
                 None
