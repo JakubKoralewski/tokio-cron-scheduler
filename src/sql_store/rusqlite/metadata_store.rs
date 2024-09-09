@@ -1,5 +1,5 @@
 use crate::job::job_data_prost::{CronJob, JobType, NonCronJob};
-use crate::postgres::PostgresStore;
+use crate::sql_store::rusqlite::SqliteStore;
 use crate::store::{DataStore, InitStore, MetaDataStorage};
 use crate::{JobAndNextTick, JobSchedulerError, JobStoredData, JobUuid};
 use chrono::{DateTime, Utc};
@@ -8,27 +8,26 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio_postgres::Row;
 use tracing::error;
 use uuid::Uuid;
 
 const TABLE: &str = "job";
 
 #[derive(Clone)]
-pub struct PostgresMetadataStore {
-    pub store: Arc<RwLock<PostgresStore>>,
+pub struct SqliteMetadataStore {
+    pub store: Arc<RwLock<SqliteStore>>,
     pub init_tables: bool,
     pub table: String,
 }
 
-impl Default for PostgresMetadataStore {
+impl Default for SqliteMetadataStore {
     fn default() -> Self {
-        let init_tables = std::env::var("POSTGRES_INIT_METADATA")
+        let init_tables = std::env::var("SQLITE_INIT_METADATA")
             .map(|s| s.to_lowercase() == "true")
             .unwrap_or_default();
         let table =
-            std::env::var("POSTGRES_METADATA_TABLE").unwrap_or_else(|_| TABLE.to_lowercase());
-        let store = Arc::new(RwLock::new(PostgresStore::default()));
+            std::env::var("SQLITE_METADATA_TABLE").unwrap_or_else(|_| TABLE.to_lowercase());
+        let store = Arc::new(RwLock::new(SqliteStore::default()));
         Self {
             init_tables,
             table,
@@ -37,7 +36,7 @@ impl Default for PostgresMetadataStore {
     }
 }
 
-impl DataStore<JobStoredData> for PostgresMetadataStore {
+impl DataStore<JobStoredData> for SqliteMetadataStore {
     fn get(
         &mut self,
         id: Uuid,
@@ -48,9 +47,8 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
         Box::pin(async move {
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::GetJobData),
-                PostgresStore::Inited(store) => {
-                    let store = store.read().await;
+                SqliteStore::Created(_) => Err(JobSchedulerError::GetJobData),
+                SqliteStore::Inited(store) => {
                     let sql = "select \
                         id, last_updated, next_tick, last_tick, job_type, count, \
                         ran, stopped, schedule, repeating, repeated_every, \
@@ -59,13 +57,16 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
                         .to_string()
                         + &*table
                         + " where id = $1 limit 1";
-                    let row = store.query_one(&*sql, &[&id]).await;
-                    if let Err(e) = row {
-                        error!("Error getting value {:?}", e);
-                        return Err(JobSchedulerError::GetJobData);
+                    let row: Result<JobStoredData, _> = store.call(move |store| {
+                        Ok(store.query_row(&sql, &[&id.as_bytes()], |row| Ok(row.into()))?)
+                    }).await;
+                    match row {
+                        Err(e) => {
+                            error!("Error getting value {:?}", e);
+                            return Err(JobSchedulerError::GetJobData);
+                        },
+                        Ok(data) => Ok(Some(data))
                     }
-                    let row = row.unwrap();
-                    Ok(Some(row.into()))
                 }
             }
         })
@@ -83,10 +84,9 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
 
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::UpdateJobData),
-                PostgresStore::Inited(store) => {
+                SqliteStore::Created(_) => Err(JobSchedulerError::UpdateJobData),
+                SqliteStore::Inited(store) => {
                     let uuid: Uuid = data.id.as_ref().unwrap().into();
-                    let store = store.read().await;
                     let sql = "INSERT INTO ".to_string()
                         + &*table
                         + " (\
@@ -129,25 +129,25 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
                     let last_tick = data.last_tick.as_ref().map(|i| *i as i64);
                     let time_offset_seconds = data.time_offset_seconds;
 
-                    let val = store
-                        .query(
-                            &*sql,
-                            &[
-                                &uuid,
-                                &last_updated,
-                                &next_tick,
-                                &job_type,
-                                &count,
-                                &ran,
-                                &stopped,
-                                &schedule,
-                                &repeating,
-                                &repeated_every,
-                                &extra,
-                                &last_tick,
-                                &time_offset_seconds,
+                    let val = store.call(move |store|
+                        Ok(store.execute(
+                            &sql,
+                            tokio_rusqlite::params![
+                                uuid.as_bytes(),
+                                last_updated,
+                                next_tick,
+                                job_type,
+                                count,
+                                ran,
+                                stopped,
+                                schedule,
+                                repeating,
+                                repeated_every,
+                                extra,
+                                last_tick,
+                                time_offset_seconds,
                             ],
-                        )
+                        )?))
                         .await;
                     if let Err(e) = val {
                         error!("Error {:?}", e);
@@ -170,11 +170,17 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
         Box::pin(async move {
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::CantRemove),
-                PostgresStore::Inited(store) => {
-                    let store = store.read().await;
+                SqliteStore::Created(_) => Err(JobSchedulerError::CantRemove),
+                SqliteStore::Inited(store) => {
+
                     let sql = "DELETE FROM ".to_string() + &*table + " WHERE id = $1";
-                    let val = store.query(&*sql, &[&guid]).await;
+                    // let val = store.query(&*sql, &[&guid]).await;
+                    let val = store.call(move |store|
+                        Ok(store.execute(
+                            &sql,
+                            &[&guid.as_bytes()]
+                        )?)
+                    ).await;
                     match val {
                         Ok(_) => Ok(()),
                         Err(e) => {
@@ -188,40 +194,40 @@ impl DataStore<JobStoredData> for PostgresMetadataStore {
     }
 }
 
-impl From<Row> for JobStoredData {
-    fn from(row: Row) -> Self {
+impl<'stmt> From<&tokio_rusqlite::Row<'stmt>> for JobStoredData {
+    fn from(row: &tokio_rusqlite::Row<'stmt>) -> Self {
         /*
         id, last_updated, next_tick, last_tick, job_type, count, \
                         ran, stopped, schedule, repeating, repeated_every, \
                         extra, time_offset_seconds
          */
-        let id: Uuid = row.get(0);
-        let last_updated = row.try_get(1).ok().map(|i: i64| i as u64);
+        let id: Uuid = Uuid::from_bytes(row.get(0).unwrap());
+        let last_updated = row.get(1).ok().map(|i: i64| i as u64);
         let next_tick = row
-            .try_get(2)
+            .get(2)
             .ok()
             .map(|i: i64| i as u64)
             .unwrap_or_default();
-        let last_tick = row.try_get(3).ok().map(|i: i64| i as u64);
+        let last_tick = row.get(3).ok().map(|i: i64| i as u64);
 
-        let job_type: i32 = row.try_get(4).unwrap_or_default();
-        let count = row.try_get(5).unwrap_or_default();
-        let ran = row.try_get(6).unwrap_or_default();
-        let stopped = row.try_get(7).unwrap_or_default();
+        let job_type: i32 = row.get(4).unwrap_or_default();
+        let count = row.get(5).unwrap_or_default();
+        let ran = row.get(6).unwrap_or_default();
+        let stopped = row.get(7).unwrap_or_default();
         let job = {
             use crate::job::job_data_prost::job_stored_data::Job::CronJob as CronJobType;
             use crate::job::job_data_prost::job_stored_data::Job::NonCronJob as NonCronJobType;
 
             let job_type = JobType::from_i32(job_type);
             match job_type {
-                Some(JobType::Cron) => match row.try_get(8) {
+                Some(JobType::Cron) => match row.get(8) {
                     Ok(schedule) => Some(CronJobType(CronJob { schedule })),
                     _ => None,
                 },
                 Some(_) => {
-                    let repeating = row.get(9);
+                    let repeating = row.get(9).unwrap();
                     let repeated_every = row
-                        .try_get(10)
+                        .get(10)
                         .ok()
                         .map(|i: i64| i as u64)
                         .unwrap_or_default();
@@ -233,8 +239,8 @@ impl From<Row> for JobStoredData {
                 None => None,
             }
         };
-        let extra = row.try_get(11).unwrap_or_default();
-        let time_offset_seconds = row.try_get(12).unwrap_or_default();
+        let extra = row.get(11).unwrap_or_default();
+        let time_offset_seconds = row.get(12).unwrap_or_default();
 
         Self {
             id: Some(id.into()),
@@ -252,7 +258,7 @@ impl From<Row> for JobStoredData {
     }
 }
 
-impl InitStore for PostgresMetadataStore {
+impl InitStore for SqliteMetadataStore {
     fn init(&mut self) -> Pin<Box<dyn Future<Output = Result<(), JobSchedulerError>> + Send>> {
         let inited = self.inited();
         let store = self.store.clone();
@@ -267,29 +273,32 @@ impl InitStore for PostgresMetadataStore {
                 match val {
                     Ok(v) => {
                         if init_tables {
-                            if let PostgresStore::Inited(client) = &v {
-                                let v = client.read().await;
+                            if let SqliteStore::Inited(client) = &v {
+                                // let v = client.read().await;
                                 let sql = "CREATE TABLE IF NOT EXISTS ".to_string()
                                     + &*table
                                     + " (\
-                                            id UUID,\
+                                            id BLOB,\
                                             last_updated BIGINT,\
                                             next_tick BIGINT,\
                                             last_tick BIGINT,\
                                             job_type INTEGER NOT NULL,\
                                             count INTEGER,\
-                                            ran BOOL,\
-                                            stopped BOOL,\
+                                            ran BOOLEAN,\
+                                            stopped BOOLEAN,\
                                             schedule TEXT,\
-                                            repeating BOOL,\
+                                            repeating BOOLEAN,\
                                             repeated_every BIGINT,\
                                             time_offset_seconds INTEGER, \
-                                            extra BYTEA, \
+                                            extra BLOB, \
                                             CONSTRAINT pk_metadata PRIMARY KEY (id) \
                                         )";
-                                let create = v.execute(&*sql, &[]).await;
+                                let create = client.call(move |store|
+                                    Ok(store.execute(&sql, [])?)
+                                ).await;
+                                // let create = v.execute(&*sql, &[]).await;
                                 if let Err(e) = create {
-                                    error!("Error on init Postgres Metadata store {:?}", e);
+                                    error!("Error on init Sqlite Metadata store {:?}", e);
                                     return Err(JobSchedulerError::CantInit);
                                 }
                             }
@@ -317,7 +326,7 @@ impl InitStore for PostgresMetadataStore {
     }
 }
 
-impl MetaDataStorage for PostgresMetadataStore {
+impl MetaDataStorage for SqliteMetadataStore {
     fn list_next_ticks(
         &mut self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<JobAndNextTick>, JobSchedulerError>> + Send>> {
@@ -327,9 +336,9 @@ impl MetaDataStorage for PostgresMetadataStore {
         Box::pin(async move {
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::CantListNextTicks),
-                PostgresStore::Inited(store) => {
-                    let store = store.read().await;
+                SqliteStore::Created(_) => Err(JobSchedulerError::CantListNextTicks),
+                SqliteStore::Inited(store) => {
+                    // let store = store.read().await;
                     let now = Utc::now().timestamp();
                     let sql = "SELECT \
                             id, job_type, next_tick, last_tick \
@@ -340,34 +349,42 @@ impl MetaDataStorage for PostgresMetadataStore {
                         WHERE \
                               next_tick > 0 \
                           AND next_tick < $1";
-                    let rows = store.query(&*sql, &[&now]).await;
-                    match rows {
-                        Ok(rows) => Ok(rows
-                            .iter()
-                            .map(|row| {
-                                let id: Uuid = row.get(0);
+                    
+                    let rows: Vec<JobAndNextTick> = store.call(
+                        move |store| {
+                            let mut stmt = store.prepare(&*sql)?;
+                            let x = Ok(stmt.query_map([now], |row| {
+                                let id: Uuid = Uuid::from_bytes(row.get(0)?);
                                 let id: JobUuid = id.into();
-                                let job_type = row.get(1);
+                                let job_type = row.get(1)?;
                                 let next_tick = row
-                                    .try_get(2)
+                                    .get(2)
                                     .ok()
                                     .map(|i: i64| i as u64)
                                     .unwrap_or_default();
-                                let last_tick = row.try_get(3).ok().map(|i: i64| i as u64);
+                                let last_tick = row.get(3).map(|i: i64| i as u64).ok();
 
-                                JobAndNextTick {
+                                Ok(JobAndNextTick {
                                     id: Some(id),
                                     job_type,
                                     next_tick,
                                     last_tick,
-                                }
-                            })
-                            .collect::<Vec<_>>()),
-                        Err(e) => {
-                            error!("Error getting next ticks {:?}", e);
-                            Err(JobSchedulerError::CantListNextTicks)
+                                })
+                            })?.collect::<Result<Vec<_>, _>>()?); x
                         }
-                    }
+                    ).await.unwrap();
+                    Ok(rows)
+                    // match rows {
+                    //     Ok(rows) => Ok(rows
+                    //         .iter()
+                    //         .map(|row| {
+                    //         })
+                    //         .collect::<Vec<_>>()),
+                    //     Err(e) => {
+                    //         error!("Error getting next ticks {:?}", e);
+                    //         Err(JobSchedulerError::CantListNextTicks)
+                    //     }
+                    // }
                 }
             }
         })
@@ -385,9 +402,9 @@ impl MetaDataStorage for PostgresMetadataStore {
         Box::pin(async move {
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::UpdateJobData),
-                PostgresStore::Inited(store) => {
-                    let store = store.read().await;
+                SqliteStore::Created(_) => Err(JobSchedulerError::UpdateJobData),
+                SqliteStore::Inited(store) => {
+                    // let store = store.read().await;
                     let next_tick = next_tick.map(|b| b.timestamp()).unwrap_or(0);
                     let last_tick = last_tick.map(|b| b.timestamp());
                     let sql = "UPDATE ".to_string()
@@ -397,7 +414,9 @@ impl MetaDataStorage for PostgresMetadataStore {
                          next_tick=$1, last_tick=$2 \
                         WHERE \
                             id = $3";
-                    let resp = store.query(&sql, &[&next_tick, &last_tick, &guid]).await;
+                    let resp = store.call(move |store|
+                        Ok(store.execute(&sql, tokio_rusqlite::params![&next_tick, &last_tick, &guid.as_bytes()])?)
+                    ).await;
                     if let Err(e) = resp {
                         error!("Error updating next and last tick {:?}", e);
                         Err(JobSchedulerError::UpdateJobData)
@@ -417,9 +436,9 @@ impl MetaDataStorage for PostgresMetadataStore {
         Box::pin(async move {
             let store = store.read().await;
             match &*store {
-                PostgresStore::Created(_) => Err(JobSchedulerError::CouldNotGetTimeUntilNextTick),
-                PostgresStore::Inited(store) => {
-                    let store = store.read().await;
+                SqliteStore::Created(_) => Err(JobSchedulerError::CouldNotGetTimeUntilNextTick),
+                SqliteStore::Inited(store) => {
+                    // let store = store.read().await;
                     let now = Utc::now().timestamp();
                     let sql = "SELECT \
                             next_tick \
@@ -432,19 +451,26 @@ impl MetaDataStorage for PostgresMetadataStore {
                           AND next_tick > $2 \
                         ORDER BY next_tick ASC \
                         LIMIT 1";
-                    let row = store.query(&*sql, &[&now]).await;
-                    if let Err(e) = row {
-                        error!("Error getting time until next job {:?}", e);
-                        return Err(JobSchedulerError::CouldNotGetTimeUntilNextTick);
+                    let row = store.call(move |store|
+                        Ok(store.query_row(&sql, [&now], 
+                            |row|
+                                Ok(row
+                                    .get::<_, i64>(0)
+                                    .ok()
+                                    // .map(|r| r.get::<_, i64>(0))
+                                    .map(|ts| ts - now)
+                                    .filter(|ts| *ts > 0)
+                                    .map(|ts| ts as u64)
+                                    .map(std::time::Duration::from_secs))
+                        )?)
+                    ).await;
+                    match row {
+                        Err(e) => {
+                            error!("Error getting time until next job {:?}", e);
+                            Err(JobSchedulerError::CouldNotGetTimeUntilNextTick)
+                        },
+                        Ok(row) => Ok(row)
                     }
-                    let row = row.unwrap();
-                    Ok(row
-                        .get(0)
-                        .map(|r| r.get::<_, i64>(0))
-                        .map(|ts| ts - now)
-                        .filter(|ts| *ts > 0)
-                        .map(|ts| ts as u64)
-                        .map(std::time::Duration::from_secs))
                 }
             }
         })

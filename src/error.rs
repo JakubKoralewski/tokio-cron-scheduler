@@ -36,6 +36,8 @@ pub enum JobSchedulerError {
     NatsCouldNotConnect(String),
     #[cfg(feature = "nats_storage")]
     NatsCouldNotCreateKvStore(String),
+    #[cfg(feature = "sqlite_storage")]
+    SqliteCantInit(String),
 }
 
 impl Display for JobSchedulerError {

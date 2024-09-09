@@ -10,8 +10,12 @@ mod job_scheduler;
 #[cfg(feature = "nats_storage")]
 mod nats;
 mod notification;
+#[cfg(any(feature = "postgres_storage", feature = "sqlite_storage" ))]
+mod sql_store;
 #[cfg(feature = "postgres_storage")]
-mod postgres;
+use sql_store::postgres;
+#[cfg(feature = "sqlite_storage")]
+use sql_store::rusqlite;
 mod scheduler;
 mod simple;
 mod store;
@@ -36,7 +40,10 @@ use uuid::Uuid;
 pub use crate::nats::{NatsMetadataStore, NatsNotificationStore, NatsStore, NatsStoreBuilder};
 
 #[cfg(feature = "postgres_storage")]
-pub use crate::postgres::{PostgresMetadataStore, PostgresNotificationStore, PostgresStore};
+pub use crate::sql_store::postgres::{PostgresMetadataStore, PostgresNotificationStore, PostgresStore};
+
+#[cfg(feature = "sqlite_storage")]
+pub use crate::sql_store::rusqlite::{SqliteMetadataStore, SqliteNotificationStore, SqliteStore};
 
 pub use context::Context;
 pub use error::JobSchedulerError;

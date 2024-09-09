@@ -46,10 +46,18 @@ version = "0.7"
 optional = true
 features = ["with-uuid-1"]
 
+[dependencies.tokio-rusqlite]
+# New version (after 0.5.1) hasn't been released with "bundled" feature
+git = "https://github.com/programatik29/tokio-rusqlite"
+rev = "d101d1c"
+features = [ "bundled" ]
+default-features = false
+optional = true
+
 [dev-dependencies]
 anyhow = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-chrono-tz = { version = "0.8.5" }
+chrono-tz = { version = "0.8.5" } # TODO: update chrono-tz (0.9 available atm)
 
 [build-dependencies]
 prost-build = { version = "0.13", optional = true }
@@ -61,6 +69,7 @@ nats_storage = ["nats", "has_bytes"]
 postgres_storage = ["tokio-postgres", "has_bytes"]
 postgres_native_tls = ["postgres_storage", "postgres-native-tls"]
 postgres_openssl = ["postgres_storage", "postgres-openssl"]
+sqlite_storage = ["tokio-rusqlite", "has_bytes"]
 log = ["tracing/log", "tracing/log-always"]
 
 default = []
@@ -84,6 +93,3 @@ required-features = ["nats_storage", "tracing-subscriber"]
 name = "postgres"
 path = "examples/postgres_job.rs"
 required-features = ["postgres_storage", "tracing-subscriber"]
-
-
-
